@@ -15,24 +15,25 @@ help: ## Display a list of the public targets
 	@grep -E -h "^\w.*:.*##" $(MAKEFILE_LIST) | sed -e 's/\(.*\):.*##\(.*\)/\1	\2/'
 
 install: ## Install the project.
-	$(MAKE) _show_preinstall_tasks
+	$(MAKE) _show_preinstall_notes
 	$(MAKE) _dc_compile
 
 	@echo "Installing"
-	docker compose --env-file .env.docker.local -f docker-compose.yml pull
-	docker compose --env-file .env.docker.local -f docker-compose.yml up --force-recreate --detach --remove-orphans
+	
+	docker compose --env-file .env.local --env-file .env.docker.local -f docker-compose.yml pull
+	docker compose --env-file .env.local --env-file .env.docker.local -f docker-compose.yml up --force-recreate --detach --remove-orphans
 
 	@echo "Waiting for database to be ready"
 	sleep 10
 
 	@echo "Initialize the database"
-	docker compose --env-file .env.docker.local -f docker-compose.yml exec api bin/console doctrine:schema:create
+	docker compose --env-file .env.local --env-file .env.docker.local -f docker-compose.yml exec api bin/console doctrine:schema:create
 
 	@echo "Clearing the cache"
 	$(MAKE) cc
 
 	@echo "Create jwt key pair"
-	docker compose --env-file .env.docker.local -f docker-compose.yml exec api bin/console lexik:jwt:generate-keypair --skip-if-exists
+	docker compose --env-file .env.local --env-file .env.docker.local  -f docker-compose.yml exec api bin/console lexik:jwt:generate-keypair --skip-if-exists
 	
 	$(MAKE) tenant_add
 
@@ -46,13 +47,19 @@ reinstall: ## Reinstall from scratch. Removes the database, all containers and v
 
 down:  ## Remove all containers and volumes.
 	$(MAKE) stop 
-	docker compose --env-file .env.docker.local -f docker-compose.yml down -v
+	docker compose --env-file .env.local --env-file .env.docker.local -f docker-compose.yml down -v
 
-up:  ## Take the whole environment up without altering the existing state of the containers.
-	docker compose --env-file .env.docker.local -f docker-compose.yml up -d
+up:  ## Take the environment up without altering the existing state of the containers.
+	docker compose --env-file .env.local --env-file .env.docker.local -f docker-compose.yml up -d
+
+up-dev-mode: ## Take the environment up with code checked out and available in bind mount (rw)
+	docker compose --env-file .env.local --env-file .env.docker.local -f docker-compose.yml exec --user root api chown -R 1000:1000 /var/www/html
+
+	
+
 
 stop: ## Stop all containers without altering anything else.
-	docker compose --env-file .env.docker.local -f docker-compose.yml stop
+	docker compose --env-file .env.local --env-file .env.docker.local -f docker-compose.yml stop
 
 tenant_add: ## Add a new tenant group
 	@echo ""
@@ -62,22 +69,23 @@ tenant_add: ## Add a new tenant group
 	@echo "You have to provide tenant id, tenant title and optionally a description."
 	@echo "===================================================="
 	@echo ""
-	docker compose --env-file .env.docker.local -f docker-compose.yml exec -T api bin/console app:tenant:add
+	docker compose --env-file .env.local --env-file .env.docker.local -f docker-compose.yml exec -T api bin/console app:tenant:add
 
 user_add: ## Add a new user (editor or admin)
+	@touch .env.temp && echo "$(ENV_CONTENTS)" > .env.temp # Recreate .env.temp if it is missing
 	@echo ""
 	@echo "Add a user"
 	@echo "===================================================="
 	@echo "You have to provide email, password, full name, role (editor or admin) and the tenant id."
 	@echo "===================================================="
 	@echo ""
-	docker compose --env-file .env.docker.local -f docker-compose.yml exec -T api bin/console app:user:add
+	docker compose --env-file .env.local --env-file .env.docker.local -f docker-compose.yml exec -T api bin/console app:user:add
 
 logs: ## Follow docker logs from the containers
-	docker compose --env-file .env.docker.local -f docker-compose.yml logs -f --tail=50
+	docker compose --env-file .env.local --env-file .env.docker.local -f docker-compose.yml logs -f --tail=50
 
 cc: ## Clear the cache
-	docker compose --env-file .env.docker.local -f docker-compose.yml exec api bin/console cache:clear
+	docker compose --env-file .env.local --env-file .env.docker.local -f docker-compose.yml exec api bin/console cache:clear
 
 # =============================================================================
 # HELPERS
@@ -85,7 +93,7 @@ cc: ## Clear the cache
 # These targets are usually not run manually.
 
 
-_show_preinstall_tasks:
+_show_preinstall_notes:
 	@echo ""
 	@echo "===================================================="
 	@echo "Pre-installation Tasks"
@@ -114,7 +122,17 @@ _show_notes:
 	@echo ""
 	
 _dc_compile:
-	docker compose --env-file .env.docker.local --env-file mariadb/.env.database.local -f docker-compose.server.yml -f docker-compose.mariadb.yml -f docker-compose.traefik.yml config > docker-compose.yml
+	# Compile the Docker Compose configuration from multiple YAML files
+	@COMPOSE_FILES="-f docker-compose.server.yml"; \
+	if grep -q '^INTERNAL_DATABASE=true' .env.docker.local; then \
+		COMPOSE_FILES="$$COMPOSE_FILES -f docker-compose.mariadb.yml"; \
+	fi; \
+	if grep -q '^INTERNAL_PROXY=true' .env.docker.local; then \
+		COMPOSE_FILES="$$COMPOSE_FILES -f docker-compose.traefik.yml"; \
+	fi; \
+	docker compose --env-file .env.local --env-file .env.docker.local $$COMPOSE_FILES config > docker-compose.yml
+
+
 
 
 
