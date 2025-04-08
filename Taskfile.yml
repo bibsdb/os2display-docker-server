@@ -10,7 +10,7 @@ tasks:
   install:
     desc: Install the project
     deps:
-      - _dc_compile
+      - _update_docker_compose_images
     cmds:
       - task _show_preinstall_notes
       - echo "Installing"
@@ -176,3 +176,20 @@ tasks:
           COMPOSE_FILES="$COMPOSE_FILES -f docker-compose.traefik.yml"
         fi
         docker compose --env-file .env.local --env-file .env.docker.local $COMPOSE_FILES config > docker-compose.yml
+        
+  _update_docker_compose_images:
+    deps:
+      - _dc_compile
+    cmds:
+      - |
+        if [ -f docker-compose.yml ]; then
+          echo "Updating Docker Compose images..."
+          sed -i "s|itkdev/os2display-api-service-nginx|$(grep ^TASK_API_IMAGE= .env.docker.local | cut -d '=' -f 2 | tr -d '\"')|g" docker-compose.yml
+          sed -i "s|itkdev/os2display-admin-client|$(grep ^TASK_ADMIN_IMAGE= .env.docker.local | cut -d '=' -f 2 | tr -d '\"')|g" docker-compose.yml
+          sed -i "s|itkdev/os2display-api-service|$(grep ^TASK_API_IMAGE= .env.docker.local | cut -d '=' -f 2 | tr -d '\"')|g" docker-compose.yml
+          sed -i "s|itkdev/os2display-client|$(grep ^TASK_CLIENT_IMAGE= .env.docker.local | cut -d '=' -f 2 | tr -d '\"')|g" docker-compose.yml
+          echo "Docker Compose images updated successfully."
+        else
+          echo "docker-compose.yml does not exist. Skipping image update."
+        fi
+
