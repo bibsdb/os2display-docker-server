@@ -120,6 +120,45 @@ tasks:
     desc: Clear the cache
     cmds:
       - docker compose --env-file .env.local --env-file .env.docker.local -f docker-compose.yml exec api bin/console cache:clear
+      
+  dev-setup-env:
+    desc: Set up the development environment
+    cmds:
+      - |
+        echo "Setting up the development environment..."
+        VERSION=$(grep ^COMPOSE_VERSION_API= .env.docker.local | cut -d '=' -f 2)
+        if [ -z "$VERSION" ]; then
+          echo "Error: COMPOSE_VERSION_API is not set in .env.docker.local"
+          exit 1
+        fi
+        if [ ! -d "display-api-service" ]; then
+          echo "Cloning the os2display/display-api-service repository..."
+          git clone https://github.com/os2display/display-api-service.git
+        fi
+        cd display-api-service && git fetch --tags && git checkout tags/$VERSION -b $VERSION
+        echo "Development environment set up with tag $VERSION."
+
+  dev-sync-api:
+    desc: Sync files from display-api-service to the api container
+    cmds:
+      - |
+        echo "Syncing files from display-api-service to the api container..."
+        if [ ! -d "display-api-service" ]; then
+          echo "Error: The display-api-service folder does not exist. Please run 'task dev-setup-env' first."
+          exit 1
+        fi
+        CONTAINER_ID=$(docker compose --env-file .env.local --env-file .env.docker.local -f docker-compose.yml ps -q api)
+        if [ -z "$CONTAINER_ID" ]; then
+          echo "Error: The api container is not running. Please start it with 'task up'."
+          exit 1
+        fi
+        docker cp display-api-service/. $CONTAINER_ID:/var/www/html
+        docker exec --user root $CONTAINER_ID chown -R deploy:deploy /var/www/html
+        docker exec --user root $CONTAINER_ID chown -R 1000:1000 /var/www/html/config/jwt
+        docker exec --user root $CONTAINER_ID chown -R 1000:1000 /var/www/html/public/media
+        docker exec --user root $CONTAINER_ID find /var/www/html -type f -exec chmod 0664 {} \;
+        docker exec --user root $CONTAINER_ID find /var/www/html -type d -exec chmod 0775 {} \;
+        echo "Files successfully synced to /var/www/html in the api container with correct ownership and permissions."
 
   _show_preinstall_notes:
     cmds:
